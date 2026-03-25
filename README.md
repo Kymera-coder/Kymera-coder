@@ -1,4 +1,4 @@
-🌌 Kymera Coder 4.19.2
+🌌 KC Studio 4.19.2
 
 A IDE Python Híbrida impulsionada por I.A. (Google Gemini)
 O Kymera Coder não é apenas um editor de código; é uma Estação de Desenvolvimento Inteligente construída para desenvolvedores Python que buscam produtividade máxima.
