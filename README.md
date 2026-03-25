@@ -54,10 +54,6 @@ Faça login e gere uma API Key gratuitamente.
 Cole a chave na barra superior do Kymera Coder e clique em "Conectar".
 🔒 Segurança e Continuidade: O Kymera utiliza o "Cofre do Sistema" (QSettings). Ao colar sua chave e programar, você pode fechar o aplicativo sem medo. Ao abrir novamente, o Kymera recarregará seu último código, seu chat e sua API Key automaticamente.
 🚀 Como Executar
-Após instalar as dependências, clone ou baixe o arquivo principal kymera_coder.py.
-No seu terminal, digite:
-code
-Bash
-Estúdio KC 4.19.2.py
+Deixarei ja copilado em .exe
 
 Desenvolvido por Kymera Coder 
