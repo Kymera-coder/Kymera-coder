@@ -67,8 +67,10 @@ Cole a chave na barra superior do Kymera Coder e clique em "Conectar".
 
 Após instalar as dependências, clone ou baixe o arquivo principal Kc Studio 4.19.2.py.
 No seu terminal, digite:
-code
+code:
+
 Bash
+
 python Kc Studio 4.19.2.py
 
 Desenvolvido por Kymera Coder 
