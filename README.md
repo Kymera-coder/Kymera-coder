@@ -47,8 +47,7 @@ Abra o seu terminal nativo e instale os motores gráficos e de IA:
 code:
 
 Bash
-pip install PyQt6
-google-genai pyinstaller
+pip install PyQt6 google-genai pyinstaller
 
 (O pyinstaller só é necessário se você desejar exportar seus códigos como aplicativos .EXE).
 
