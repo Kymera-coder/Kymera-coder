@@ -41,19 +41,34 @@ O Kymera Coder é leve, não utiliza Electron e foi escrito inteiramente em Pyth
 
 1. Dependências do Sistema
 Certifique-se de ter o Python (3.10 ou superior) instalado no seu computador.
+
 Abra o seu terminal nativo e instale os motores gráficos e de IA:
-code
+
+code:
+
 Bash
-pip install PyQt6 google-genai pyinstaller
+pip install PyQt6
+google-genai pyinstaller
+
 (O pyinstaller só é necessário se você desejar exportar seus códigos como aplicativos .EXE).
 
-2. Configurando a API Key (Gratuita)
+3. Configurando a API Key
+   
 Para que a Inteligência Artificial do Kymera ganhe vida:
+
 Acesse o Google AI Studio.
+
 Faça login e gere uma API Key gratuitamente.
 Cole a chave na barra superior do Kymera Coder e clique em "Conectar".
+
 🔒 Segurança e Continuidade: O Kymera utiliza o "Cofre do Sistema" (QSettings). Ao colar sua chave e programar, você pode fechar o aplicativo sem medo. Ao abrir novamente, o Kymera recarregará seu último código, seu chat e sua API Key automaticamente.
+
 🚀 Como Executar
-Deixarei ja copilado em .exe
+
+Após instalar as dependências, clone ou baixe o arquivo principal kymera_coder.py.
+No seu terminal, digite:
+code
+Bash
+pythonKc Studio 4.19.2.py
 
 Desenvolvido por Kymera Coder 
