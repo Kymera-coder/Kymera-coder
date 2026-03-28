@@ -1,6 +1,6 @@
 <img width="1439" height="899" alt="2KPC Studio 4 19 3" src="https://github.com/user-attachments/assets/03a5b7de-4b6c-4e9e-8712-175377703557" />
 
-# 🚀 Kymera Coder 4.19.3 — Editor AI Pro
+# 🚀 Kymera Python Coder Studio 4.19.3 — Editor AI Pro
 
 ## ✨ Visão Geral
 
@@ -117,7 +117,7 @@ KPC Studio 4.19.3.py
 Se preferir, você pode executar o arquivo dando dois cliques no `.py`, desde que o Python esteja configurado no sistema.
 
 ---
-[Kc Studio 4.19.3.PY](https://github.com/user-attachments/files/26318832/Kc.Studio.4.19.3.PY)
+[KPC Studio 4.19.3.PY](https://github.com/user-attachments/files/26318832/Kc.Studio.4.19.3.PY)
 
 
 ## 🔑 Configuração da IA
