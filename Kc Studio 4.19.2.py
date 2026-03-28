@@ -3,11 +3,13 @@ import os
 import subprocess
 import threading
 import re
+import json
+import html
 from google import genai
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QTextEdit, QPlainTextEdit, QPushButton, 
                              QLineEdit, QLabel, QSplitter, QFileDialog, QFrame, QMessageBox,
-                             QStatusBar, QMenu, QTreeView, QStackedWidget, QInputDialog)
+                             QStatusBar, QMenu, QTreeView, QStackedWidget, QInputDialog, QDialog)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QRegularExpression, QSettings, QDir, QSize, QRect
 from PyQt6.QtGui import (QFont, QTextCursor, QSyntaxHighlighter, QTextCharFormat, 
                          QColor, QKeyEvent, QAction, QIcon, QFileSystemModel, QPainter)
@@ -48,7 +50,6 @@ STYLESHEET = """
     QTreeView::item:selected { background-color: #37373d; color: #ffffff; }
 
     QStatusBar { background-color: #007fd4; color: #ffffff; font-size: 12px; border: none; }
-    
     QLabel#SectionTitle { color: #bbbbbb; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; padding: 5px 0; }
     
     QMenu { background-color: #252526; border: 1px solid #454545; padding: 4px 0; }
@@ -59,6 +60,40 @@ STYLESHEET = """
     QPushButton.TabBtn:hover { color: #cccccc; }
     QPushButton.TabBtn.Active { color: #e7e7e7; border-bottom: 2px solid #e7e7e7; }
 """
+
+# ==============================================================================
+# JANELA DE LOCALIZAR E SUBSTITUIR
+# ==============================================================================
+class FindReplaceDialog(QDialog):
+    def __init__(self, editor, parent=None):
+        super().__init__(parent)
+        self.editor = editor
+        self.setWindowTitle("Localizar e Substituir")
+        self.setFixedSize(400, 180)
+        self.setStyleSheet("QDialog { background-color: #1e1e1e; } QLineEdit { background-color: #252526; color: white; border: 1px solid #3c3c3c; padding: 8px; } QPushButton { background-color: #333333; color: white; padding: 8px; border: none; } QPushButton:hover { background-color: #444444; }")
+        layout = QVBoxLayout(self)
+        self.input_find = QLineEdit(); self.input_find.setPlaceholderText("Localizar...")
+        layout.addWidget(self.input_find)
+        self.input_replace = QLineEdit(); self.input_replace.setPlaceholderText("Substituir por...")
+        layout.addWidget(self.input_replace)
+        btn_layout = QHBoxLayout()
+        btn_find = QPushButton("Próximo"); btn_find.clicked.connect(self.find_next)
+        btn_replace = QPushButton("Substituir"); btn_replace.clicked.connect(self.replace)
+        btn_replace_all = QPushButton("Tudo"); btn_replace_all.clicked.connect(self.replace_all)
+        btn_layout.addWidget(btn_find); btn_layout.addWidget(btn_replace); btn_layout.addWidget(btn_replace_all)
+        layout.addLayout(btn_layout)
+
+    def find_next(self):
+        t = self.input_find.text()
+        if t and not self.editor.find(t): self.editor.moveCursor(QTextCursor.MoveOperation.Start); self.editor.find(t)
+    def replace(self):
+        if self.editor.textCursor().hasSelection(): self.editor.textCursor().insertText(self.input_replace.text())
+        self.find_next()
+    def replace_all(self):
+        f = self.input_find.text(); r = self.input_replace.text()
+        if not f: return
+        self.editor.setPlainText(self.editor.toPlainText().replace(f, r))
+        self.accept()
 
 # ==============================================================================
 # WORKERS E MOTORES
@@ -97,41 +132,43 @@ class AIStreamWorker(QThread):
         except Exception as e:
             self.error.emit(f"Erro na IA: {str(e)}")
 
-# O NOVO MOTOR DO TERMINAL (SEGURO CONTRA CRASH)
 class CmdWorker(QThread):
     output_ready = pyqtSignal(str)
-    
+    error_ready = pyqtSignal(str)
     def __init__(self, command, cwd):
         super().__init__()
         self.command = command
         self.cwd = cwd
-        
     def run(self):
         try:
-            # subprocess.PIPE captura a saída sem abrir tela preta
-            process = subprocess.Popen(
-                self.command, 
-                shell=True, 
-                cwd=self.cwd, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.STDOUT, 
-                text=True, 
-                bufsize=1,
-                universal_newlines=True # Ajuda a evitar travamentos de leitura
-            )
-            
-            # Lê linha por linha e emite o sinal para a UI de forma segura
+            process = subprocess.Popen(self.command, shell=True, cwd=self.cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True)
             for line in iter(process.stdout.readline, ''):
                 if line:
                     self.output_ready.emit(line)
-            
             process.wait()
-            self.output_ready.emit(" \n") # Envia um espaço em branco para sinalizar que terminou
-            
+            self.output_ready.emit(" \n")
+            if process.returncode != 0:
+                self.error_ready.emit(f"O comando retornou um erro (Código {process.returncode}).")
         except Exception as e:
-            self.output_ready.emit(f"Erro Fatal no Terminal: {str(e)}\n")
+            self.error_ready.emit(f"Erro Fatal no Terminal: {str(e)}\n")
             self.output_ready.emit(" \n")
 
+class ExecWorker(QThread):
+    def __init__(self, file_path):
+        super().__init__()
+        self.file_path = file_path
+    def run(self):
+        try:
+            work_dir = os.path.dirname(os.path.abspath(self.file_path)) if self.file_path else os.getcwd()
+            if not work_dir: work_dir = os.getcwd()
+            
+            if sys.platform == "win32":
+                subprocess.Popen(["cmd.exe", "/c", "start", "cmd.exe", "/k", sys.executable, self.file_path], cwd=work_dir)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", "-a", "Terminal", sys.executable, self.file_path], cwd=work_dir)
+            else:
+                subprocess.Popen(["x-terminal-emulator", "-e", f"{sys.executable} {self.file_path}"], cwd=work_dir)
+        except: pass
 
 class ExeBuilderWorker(QThread):
     output_ready = pyqtSignal(str)
@@ -157,23 +194,19 @@ class ExeBuilderWorker(QThread):
             self.finished.emit(False)
 
 # ==============================================================================
-# ÁREA DE NUMERAÇÃO DE LINHAS (Intacta da 4.19.1)
+# ÁREA DE NUMERAÇÃO DE LINHAS E TERMINAL
 # ==============================================================================
 class LineNumberArea(QWidget):
     def __init__(self, editor):
         super().__init__(editor)
         self.codeEditor = editor
+    def sizeHint(self): return QSize(self.codeEditor.lineNumberAreaWidth(), 0)
+    def paintEvent(self, event): self.codeEditor.lineNumberAreaPaintEvent(event)
 
-    def sizeHint(self):
-        return QSize(self.codeEditor.lineNumberAreaWidth(), 0)
-
-    def paintEvent(self, event):
-        self.codeEditor.lineNumberAreaPaintEvent(event)
-
-# ==============================================================================
-# O NOVO TERMINAL INTERATIVO ONSCREEN
-# ==============================================================================
 class InteractiveTerminal(QPlainTextEdit):
+    cmd_finished = pyqtSignal()
+    error_ready = pyqtSignal(str) 
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet("background: #111111; color: #cccccc; font-family: 'Consolas', monospace; font-size: 13px; border: none; padding: 10px;")
@@ -192,14 +225,11 @@ class InteractiveTerminal(QPlainTextEdit):
 
     def keyPressEvent(self, event: QKeyEvent):
         cursor = self.textCursor()
-        
-        # Impede de apagar o prompt (ex: "C:\pasta>")
         if event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Left):
             cursor.movePosition(QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.KeepAnchor)
             if cursor.selectedText() == self.prompt_text: return
             cursor.clearSelection()
 
-        # O usuário apertou Enter (enviou um comando)
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             cursor.movePosition(QTextCursor.MoveOperation.StartOfLine)
             cursor.movePosition(QTextCursor.MoveOperation.EndOfLine, QTextCursor.MoveMode.KeepAnchor)
@@ -226,17 +256,17 @@ class InteractiveTerminal(QPlainTextEdit):
         super().keyPressEvent(event)
 
     def executar_comando_direto(self, comando):
-        # AQUI a thread é iniciada.
         self.cmd_worker = CmdWorker(comando, self.current_dir)
-        self.cmd_worker.output_ready.connect(self.append_output) # O sinal seguro do Qt
+        self.cmd_worker.output_ready.connect(self.append_output)
+        self.cmd_worker.error_ready.connect(self.error_ready.emit) 
         self.cmd_worker.start()
 
     def append_output(self, text):
         self.moveCursor(QTextCursor.MoveOperation.End)
         self.insertPlainText(text)
-        # Se a Thread mandou o sinal " \n" (comando finalizado), devolvemos o prompt pro usuário digitar de novo
         if text.endswith(" \n"): 
             self.insertPlainText(self.prompt_text)
+            self.cmd_finished.emit()
         self.ensureCursorVisible()
 
 # ==============================================================================
@@ -322,9 +352,7 @@ class SmartCodeEditor(QPlainTextEdit):
                 all_words = set(re.findall(r'\b[a-zA-Z_]\w*\b', self.toPlainText()))
                 matches = [w for w in all_words if w.startswith(prefix) and w != prefix]
                 if matches:
-                    completion = matches[0][len(prefix):]
-                    cursor.clearSelection()
-                    cursor.insertText(completion)
+                    cursor.clearSelection(); cursor.insertText(matches[0][len(prefix):])
                     return 
 
         if event.key() == Qt.Key.Key_Slash and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
@@ -374,12 +402,12 @@ class PythonHighlighter(QSyntaxHighlighter):
                 self.setFormat(match.capturedStart(), match.capturedLength(), format)
 
 # ==============================================================================
-# INTERFACE PRINCIPAL
+# INTERFACE PRINCIPAL DO KYMERA
 # ==============================================================================
 class KymeraStudio(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Kymera Coder 4.19.2 - Terminal Integrado Seguro")
+        self.setWindowTitle("Kymera Coder 4.19.3 - Editor AI Pro")
         self.resize(1500, 900)
         
         self.client = None
@@ -389,6 +417,7 @@ class KymeraStudio(QMainWindow):
         self.has_unsaved_changes = False 
         self.font_size = 14
         
+        self.chat_messages = [] # Guarda o histórico da conversa com a IA
         self.settings = QSettings("HydraCorp", "KymeraCoder")
         
         self.init_ui()
@@ -464,21 +493,29 @@ class KymeraStudio(QMainWindow):
         
         btn_salvar = QPushButton("Salvar"); btn_salvar.clicked.connect(self.salvar_arquivo)
         
-        # Menu invisível de ferramentas, igual estava
         self.btn_editor_actions = QPushButton("⚙️ Ações")
         editor_menu = QMenu(self)
-        editor_menu.addAction("Reverter Arquivo", self.reverter_arquivo)
-        editor_menu.addAction("Renomear Arquivo", self.renomear_arquivo)
-        editor_menu.addAction("Alternar Quebra de Linha", self.toggle_wrap)
+        editor_menu.addAction("🔍 Localizar e Substituir", self.abrir_localizar)
+        editor_menu.addAction("➡️ Ir para Linha...", self.go_to_line)
+        editor_menu.addSeparator()
+        editor_menu.addAction("📑 Duplicar Linha (Ctrl+D)", self.duplicate_line)
+        editor_menu.addAction("💬 Comentar Bloco (Ctrl+/)", self.toggle_comment)
+        editor_menu.addAction("🔄 Alternar Quebra de Linha", self.toggle_wrap)
+        editor_menu.addSeparator()
+        editor_menu.addAction("☑️ Selecionar Tudo", self.select_all)
+        editor_menu.addAction("🗑️ Limpar Editor", self.clear_editor)
+        editor_menu.addSeparator()
+        editor_menu.addAction("📝 Renomear Arquivo", self.renomear_arquivo)
+        editor_menu.addAction("↩ Reverter Arquivo", self.reverter_arquivo)
         self.btn_editor_actions.setMenu(editor_menu)
 
-        self.btn_inject = QPushButton("Inserir no Cursor")
-        self.btn_inject.clicked.connect(self.inject_to_editor)
-        
         self.btn_exe = QPushButton("Compilar .EXE")
         self.btn_exe.clicked.connect(self.gerar_exe)
 
-        # BOTÃO RUN (AGORA MANDA PRO TERMINAL DE BAIXO!)
+        self.btn_inject = QPushButton("Inserir")
+        self.btn_inject.setObjectName("ToolBtn")
+        self.btn_inject.clicked.connect(self.inject_to_editor)
+
         self.btn_run = QPushButton("▶ Run", objectName="RunBtn")
         self.btn_run.clicked.connect(self.run_code)
         
@@ -497,7 +534,7 @@ class KymeraStudio(QMainWindow):
         self.code_editor.cursorPositionChanged.connect(self.update_status_bar)
         editor_layout.addWidget(self.code_editor)
         
-        # --- ABAS INFERIORES (TERMINAL E PROBLEMAS) ---
+        # --- ABAS INFERIORES ---
         bottom_panel = QWidget()
         bottom_layout = QVBoxLayout(bottom_panel)
         bottom_layout.setContentsMargins(0,0,0,0)
@@ -523,9 +560,8 @@ class KymeraStudio(QMainWindow):
         bottom_layout.addLayout(tabs_header)
 
         self.bottom_stack = QStackedWidget()
-        
-        # O TERMINAL INTERATIVO NATIVO!
         self.terminal = InteractiveTerminal()
+        self.terminal.error_ready.connect(self.registrar_problema) 
         self.bottom_stack.addWidget(self.terminal)
 
         self.problemas_area = QTextEdit()
@@ -541,7 +577,7 @@ class KymeraStudio(QMainWindow):
         self.editor_splitter.setStretchFactor(1, 1) 
         
         # ==========================================
-        # COLUNA 3: ASSISTENTE I.A.
+        # COLUNA 3: ASSISTENTE I.A. 
         # ==========================================
         self.ai_panel = QFrame(); self.ai_panel.setObjectName("AI_Panel")
         self.ai_panel.setMinimumWidth(300)
@@ -551,7 +587,7 @@ class KymeraStudio(QMainWindow):
         ai_header.addWidget(QLabel("COPILOT", objectName="SectionTitle"))
         ai_header.addStretch()
         
-        self.btn_ai_tools = QPushButton("Ferramentas I.A.", objectName="ToolBtn")
+        self.btn_ai_tools = QPushButton("Ferramentas", objectName="ToolBtn")
         ai_menu = QMenu(self)
         ai_menu.addAction("Achar Bug no Código", self.find_bug)
         ai_menu.addAction("Explicar Código", self.explain_code)
@@ -565,7 +601,7 @@ class KymeraStudio(QMainWindow):
         
         self.chat_area = QTextEdit()
         self.chat_area.setReadOnly(True)
-        self.chat_area.setStyleSheet("font-size: 14px; line-height: 1.6; border: none; background: transparent; color: #d4d4d4;")
+        self.chat_area.setStyleSheet("border: none; background: transparent; padding: 5px;")
         ai_layout.addWidget(self.chat_area)
         
         chat_input_layout = QHBoxLayout()
@@ -597,7 +633,7 @@ class KymeraStudio(QMainWindow):
         self.status_bar.addPermanentWidget(self.lbl_cursor_pos)
         self.status_bar.showMessage("Kymera IDE Pronto")
 
-    # --- FUNÇÕES NATIVAS DO EDITOR E ABAS ---
+    # --- FUNÇÕES ---
     def switch_bottom_tab(self, index):
         self.bottom_stack.setCurrentIndex(index)
         if index == 0:
@@ -620,6 +656,35 @@ class KymeraStudio(QMainWindow):
         self.switch_bottom_tab(1)
         self.iniciar_transmissao_ia("Conserte os erros que deram no terminal.", f"Analise o meu código e os erros abaixo e me dê a solução em código:\nErros:\n```\n{erros}\n```")
 
+    def abrir_localizar(self): FindReplaceDialog(self.code_editor, self).show()
+    
+    def go_to_line(self):
+        line, ok = QInputDialog.getInt(self, "Ir para Linha", "Número da linha:", 1, 1, self.code_editor.blockCount())
+        if ok:
+            c = self.code_editor.textCursor(); c.setPosition(0); c.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.MoveAnchor, line - 1)
+            self.code_editor.setTextCursor(c); self.code_editor.setFocus()
+
+    def duplicate_line(self):
+        c = self.code_editor.textCursor()
+        c.movePosition(QTextCursor.MoveOperation.StartOfLine); c.movePosition(QTextCursor.MoveOperation.EndOfLine, QTextCursor.MoveMode.KeepAnchor)
+        t = c.selectedText(); c.clearSelection(); c.insertText("\n" + t)
+
+    def toggle_comment(self):
+        c = self.code_editor.textCursor()
+        s = c.selectionStart(); e = c.selectionEnd()
+        c.setPosition(s); sb = c.blockNumber(); c.setPosition(e); eb = c.blockNumber()
+        c.beginEditBlock()
+        for i in range(sb, eb + 1):
+            c.movePosition(QTextCursor.MoveOperation.StartOfLine); c.movePosition(QTextCursor.MoveOperation.EndOfLine, QTextCursor.MoveMode.KeepAnchor)
+            l = c.selectedText()
+            if l.startswith("# "): c.insertText(l[2:])
+            else: c.insertText("# " + l)
+            c.movePosition(QTextCursor.MoveOperation.NextBlock)
+        c.endEditBlock()
+
+    def select_all(self): self.code_editor.selectAll()
+    def clear_editor(self): self.code_editor.clear()
+    
     def reverter_arquivo(self):
         if not self.current_file: return
         resp = QMessageBox.question(self, "Reverter", "Isso apagará todas as mudanças não salvas. Continuar?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -644,7 +709,6 @@ class KymeraStudio(QMainWindow):
             self.code_editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
             self.status_bar.showMessage("Wrap: DESATIVADO", 3000)
 
-    # --- LÓGICA DO SISTEMA ---
     def _verificar_motor_ia(self):
         if not self.chat_session:
             QMessageBox.warning(self, "Aviso", "Conecte a API Key no topo.")
@@ -657,7 +721,12 @@ class KymeraStudio(QMainWindow):
         c = self.settings.value("last_code", "")
         if c: self.code_editor.setPlainText(c); self.has_unsaved_changes = False
         ch = self.settings.value("last_chat", "")
-        if ch: self.chat_area.setHtml(ch)
+        if ch:
+            try:
+                self.chat_messages = json.loads(ch)
+                self.render_chat()
+            except:
+                self.chat_messages = []
 
     def on_text_changed(self): self.has_unsaved_changes = True
 
@@ -667,11 +736,11 @@ class KymeraStudio(QMainWindow):
 
     def closeEvent(self, event):
         if self.has_unsaved_changes:
-            resp = QMessageBox.question(self, "Aviso", "Código não salvo. Sair?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            resp = QMessageBox.question(self, "Aviso", "Você tem código não salvo. Deseja sair?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if resp == QMessageBox.StandardButton.No: event.ignore(); return
         self.settings.setValue("gemini_token", self.token_input.text().strip())
         self.settings.setValue("last_code", self.code_editor.toPlainText())
-        self.settings.setValue("last_chat", self.chat_area.toHtml())
+        self.settings.setValue("last_chat", json.dumps(self.chat_messages))
         super().closeEvent(event)
 
     def abrir_pasta(self):
@@ -701,7 +770,9 @@ class KymeraStudio(QMainWindow):
             self.file_label.setText(os.path.basename(self.current_file)); self.has_unsaved_changes = False; self.status_bar.showMessage("Salvo", 3000)
         except: pass
 
-    # --- INTELIGÊNCIA ARTIFICIAL E EXECUÇÃO DE CÓDIGO ---
+    # ==================================================================
+    # NOVA IA (RENDERIZADOR EM CARDS / MARKDOWN)
+    # ==================================================================
     def start_discovery(self):
         key = self.token_input.text().strip()
         if not key: return
@@ -714,8 +785,7 @@ class KymeraStudio(QMainWindow):
 
     def on_disc_success(self, client, chat_session):
         self.client = client; self.chat_session = chat_session
-        self.btn_connect.setText("Online")
-        self.btn_connect.setEnabled(True)
+        self.btn_connect.setText("Online"); self.btn_connect.setEnabled(True)
 
     def on_disc_error(self, err):
         self.btn_connect.setEnabled(True)
@@ -725,7 +795,8 @@ class KymeraStudio(QMainWindow):
     def limpar_memoria_ia(self):
         if not self._verificar_motor_ia(): return
         self.chat_session = self.client.chats.create(model="gemini-2.5-flash")
-        self.chat_area.clear() 
+        self.chat_messages = []
+        self.render_chat() 
 
     def find_bug(self):
         if not self._verificar_motor_ia(): return
@@ -751,26 +822,71 @@ class KymeraStudio(QMainWindow):
         if not self._verificar_motor_ia(): return
         
         c = self.code_editor.toPlainText().strip()
-        sp = "\n(Instrução interna: Crie interfaces gráficas modernas com PyQt6 ou CustomTkinter. Tema Dark Mode nativo. Retorne o código em markdown python.)"
+        sp = "\n(Instrução interna: Atue como Engenheiro de Software. Use Python. Para GUIs, use PyQt6 Dark Mode. NÃO USE input(). Mande o código em markdown python.)"
         p = f"Dado o código atual, responda: {u}\n\n```python\n{c}\n``` {sp}" if c else u + sp
         self.user_input.clear()
         self.iniciar_transmissao_ia(u, p)
 
+    # FUNÇÃO MÁGICA: Pinta o código em tabelas e formata o texto da I.A.
+    def format_markdown(self, text):
+        parts = re.split(r"(```.*?```)", text, flags=re.DOTALL)
+        formatted = []
+        for part in parts:
+            if part.startswith("```") and part.endswith("```"):
+                code_content = part.strip("`")
+                if "\n" in code_content:
+                    lang, code = code_content.split("\n", 1)
+                else:
+                    lang, code = "", code_content
+                
+                # HTML Nativo Inquebrável para Cartões de Código!
+                code_escaped = html.escape(code.strip())
+                card = f"""
+                <br><table width="100%" style="background-color: #0A0A0C; border: 1px solid #3c3c3c; border-radius: 4px;">
+                    <tr><td style="background-color: #1e1e1e; color: #858585; padding: 4px 8px; font-size: 11px; font-weight: bold; border-bottom: 1px solid #3c3c3c;">&lt;/&gt; CÓDIGO {lang.upper()}</td></tr>
+                    <tr><td style="padding: 10px; color: #10b981; font-family: Consolas;">
+                        <pre style="margin: 0; font-family: Consolas; font-size: 14px;">{code_escaped}</pre>
+                    </td></tr>
+                </table><br>
+                """
+                formatted.append(card)
+            else:
+                text_html = html.escape(part).replace("\n", "<br>")
+                text_html = re.sub(r"\*\*(.*?)\*\*", r"<b style='color:#ffffff;'>\1</b>", text_html)
+                formatted.append(text_html)
+        return "".join(formatted)
+
+    def render_chat(self):
+        html_content = "<div style='font-family: Segoe UI, sans-serif; font-size: 13px; line-height: 1.5; color: #cccccc;'>"
+        for msg in self.chat_messages:
+            if msg["role"] == "user":
+                html_content += f"<div style='margin-bottom: 15px;'><b style='color:#0ea5e9;'>VOCÊ:</b><br>{html.escape(msg['text'])}</div>"
+            elif msg["role"] == "ai":
+                html_content += f"<div style='margin-bottom: 20px;'><b style='color:#a855f7;'>COPILOT:</b><br>{self.format_markdown(msg['text'])}</div>"
+            elif msg["role"] == "error":
+                html_content += f"<div style='margin-bottom: 15px; color:#da373c;'><b>ERRO:</b> {html.escape(msg['text'])}</div>"
+        html_content += "</div>"
+        
+        sb = self.chat_area.verticalScrollBar()
+        at_bottom = sb.value() == sb.maximum()
+        self.chat_area.setHtml(html_content)
+        if at_bottom: sb.setValue(sb.maximum())
+
     def iniciar_transmissao_ia(self, texto_display, prompt_real):
-        self.chat_area.append(f"<br><b style='color:#cccccc;'>Você:</b> {texto_display}<br>")
-        self.chat_area.append(f"<b style='color:#007acc;'>Kymera:</b> ")
+        self.chat_messages.append({"role": "user", "text": texto_display})
+        self.chat_messages.append({"role": "ai", "text": ""}) 
+        self.render_chat()
+
         self.worker_ai = AIStreamWorker(self.chat_session, prompt_real)
         self.worker_ai.chunk_received.connect(self.update_chat_typing)
         self.worker_ai.finished.connect(self.on_ai_finished)
-        self.worker_ai.error.connect(lambda e: self.chat_area.append(f"<br><b style='color:#f14c4c;'>{e}</b>"))
+        self.worker_ai.error.connect(lambda e: (self.chat_messages.append({"role": "error", "text": e}), self.render_chat()))
         self.worker_ai.start()
 
     def update_chat_typing(self, chunk):
-        c = self.chat_area.textCursor()
-        c.movePosition(QTextCursor.MoveOperation.End)
-        c.insertHtml(chunk.replace("\n", "<br>").replace("`", ""))
-        self.chat_area.setTextCursor(c)
-        self.chat_area.ensureCursorVisible()
+        if self.chat_messages:
+            self.chat_messages[-1]["text"] += chunk
+            self.render_chat()
 
     def on_ai_finished(self, full_text):
         match = re.search(r"```[pP]ython\n(.*?)```", full_text, re.DOTALL)
@@ -787,24 +903,18 @@ class KymeraStudio(QMainWindow):
             self.code_editor.setFocus()
 
     def run_code(self):
-        # AQUI O CÓDIGO É RODADO NO TERMINAL EMBUTIDO DO APLICATIVO!
-        code = self.code_editor.toPlainText().strip()
-        if not code: return
-        
-        file_to_run = self.current_file
-        if not file_to_run:
-            file_to_run = os.path.abspath("kymera_temp_run.py")
-            with open(file_to_run, "w", encoding="utf-8") as file: file.write(code)
+        c = self.code_editor.toPlainText().strip()
+        if not c: return
+        f = self.current_file
+        if not f:
+            f = os.path.abspath("kymera_temp_run.py")
+            with open(f, "w", encoding="utf-8") as file: file.write(c)
         else:
             self.salvar_arquivo()
-        
-        # Mudar para a aba do terminal na hora do run
         self.switch_bottom_tab(0)
         self.terminal.clear_terminal()
-        self.terminal.appendPlainText(f"\n> Rodando {os.path.basename(file_to_run)}...\n")
-        
-        # Envia o comando nativo pro terminal invisível
-        comando = f'{sys.executable} "{file_to_run}"'
+        self.terminal.appendPlainText(f"\n> Rodando: {os.path.basename(f)}\n")
+        comando = f'{sys.executable} "{f}"'
         self.terminal.executar_comando_direto(comando)
 
     def gerar_exe(self):
